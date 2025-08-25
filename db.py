@@ -37,8 +37,6 @@ class Database:
                 type TEXT NOT NULL CHECK(type IN ('IN','OUT','ADJ')),
                 qty_kg REAL NOT NULL,
                 unit_price_kg REAL,
-                qty_sac_sold REAL DEFAULT 0,
-                qty_kg_sold REAL DEFAULT 0,
                 note TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(product_id) REFERENCES product(id),
@@ -56,10 +54,6 @@ class Database:
     def add_shop(self, libelle: str):
         self.cnx.execute("INSERT INTO shop(libelle) VALUES (?)", (libelle,))
         self.cnx.commit()
-    
-    def get_shop_by_libelle(self, libelle: str) -> Optional[Dict]:
-        r = self.cnx.execute("SELECT * FROM shop WHERE libelle=?", (libelle,)).fetchone()
-        return dict(r) if r else None
 
     def rename_shop(self, shop_id: int, libelle: str):
         self.cnx.execute("UPDATE shop SET libelle=? WHERE id=?", (libelle, shop_id))
@@ -106,25 +100,21 @@ class Database:
     def get_product(self, pid: int) -> Optional[Dict]:
         r = self.cnx.execute("SELECT * FROM product WHERE id=?", (pid,)).fetchone()
         return dict(r) if r else None
-        
-    def get_product_by_libelle(self, libelle: str) -> Optional[Dict]:
-        r = self.cnx.execute("SELECT * FROM product WHERE libelle=?", (libelle,)).fetchone()
-        return dict(r) if r else None
 
     # Movements
-    def add_movement(self, date: str, mtype: str, product_id: int, shop_id: int, qty_kg: float, unit_price_kg: Optional[float] = None, qty_sac_sold: Optional[float] = 0, qty_kg_sold: Optional[float] = 0, note: str = ""):
+    def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, note: str = "", unit_price_kg: Optional[float] = None):
         self.cnx.execute(
-            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, qty_sac_sold, qty_kg_sold, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, qty_sac_sold, qty_kg_sold, note, date)
+            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, note, created_at) VALUES (?,?,?,?,?,?,?)",
+            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, note, datetime.now().isoformat(timespec="seconds"))
         )
         self.cnx.commit()
 
     def list_movements(self,
-                        mtype: Optional[str] = None,
-                        shop_id: Optional[int] = None,
-                        q: str = "",
-                        date_from: Optional[str] = None,
-                        date_to: Optional[str] = None) -> List[Dict]:
+                       mtype: Optional[str] = None,
+                       shop_id: Optional[int] = None,
+                       q: str = "",
+                       date_from: Optional[str] = None,
+                       date_to: Optional[str] = None) -> List[Dict]:
         where = []
         params: List = []
 
@@ -145,7 +135,7 @@ class Database:
             params.append(date_to)
 
         sql = """
-            SELECT m.*, p.libelle AS product_libelle, p.poids_sac_kg, p.prix_sac, s.libelle AS shop_libelle
+            SELECT m.*, p.libelle AS product_libelle, p.poids_sac_kg, s.libelle AS shop_libelle
             FROM movement m
             JOIN product p ON p.id = m.product_id
             JOIN shop s ON s.id = m.shop_id
@@ -169,9 +159,7 @@ class Database:
         result = []
         for p in products:
             qty = self.stock_kg(p["id"], shop_id=shop_id)
-            d = dict(p)
-            d["stock_kg"] = qty
-            result.append((d, qty))
+            result.append((p, qty))
         return result
 
     def total_stock_kg(self, shop_id: int = 1) -> float:

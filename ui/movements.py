@@ -48,7 +48,7 @@ class MovementsPage(BasePage):
         ttk.Button(f, text="Rafraîchir", bootstyle="info", command=self.refresh).pack(side=LEFT)
 
         # ---
-        # Summary Frame
+        # Summary Frame (newly added)
         # ---
         summary_frame = ttk.Frame(self)
         summary_frame.pack(fill=X, pady=(10, 0))
@@ -95,6 +95,7 @@ class MovementsPage(BasePage):
                     shop_id = s["id"]
                     break
 
+        # Récupère les dates au format YYYY-MM-DD depuis le DateEntry
         date_from = self.date_from_entry.entry.get().strip() or None
         date_to = self.date_to_entry.entry.get().strip() or None
 
@@ -106,62 +107,32 @@ class MovementsPage(BasePage):
             date_to=date_to
         )
 
+        # ---
+        # Calculate summary totals (newly added)
+        # ---
         total_in_value = 0
         total_out_value = 0
-        
-        # ---
-        # Logique de calcul du bénéfice mise à jour
-        # ---
         for m in items:
-            # Pour que ce calcul soit précis, la méthode `list_movements` de votre base de données
-            # doit retourner `prix_sac` en plus des informations existantes.
-            # On suppose ici que votre base de données a été mise à jour pour inclure cette information.
-            
-            # Récupération des prix et des quantités
-            price_kg = m.get("unit_price_kg", 0)
-            prix_sac = m.get("prix_sac", 0)
-            
-            # IMPORTANT: La base de données ne stocke que la quantité totale en kg.
-            # Pour retrouver la répartition entre sacs et kilos, il faut faire une division
-            # ce qui peut être imprécis.
-            # L'idéal serait de stocker `qty_sac` et `qty_kg_saisie` dans la base de données.
-            
-            # Utilisation de la quantité totale en kg pour un calcul simplifié et cohérent.
-            # Ceci ne prend pas en compte le prix par sac si la quantité initiale n'a pas été
-            # saisie comme "x sacs et y kilos".
-            
             if m["type"] == "IN":
-                # Pour les entrées, on utilise le prix unitaire par kg
-                total_in_value += m["qty_kg"] * price_kg
+                total_in_value += m["qty_kg"] * m["unit_price_kg"]
             elif m["type"] == "OUT":
-                # Pour les sorties, on utilise le prix de vente total
-                # Pour le calcul du bénéfice, on a besoin du coût d'achat.
-                # Votre base de données ne stocke pas le prix d'achat, on va donc
-                # utiliser un calcul simplifié pour les valeurs.
-                
-                # Le calcul du bénéfice est : prix de vente - prix d'achat.
-                # L'exemple que vous avez donné était : (3 sacs * prix_sac) + (4 kg * prix_kg)
-                # On va donc faire ce calcul en supposant que la BD contient les bonnes infos
-                
-                # IMPORTANT: Cette ligne suppose que la BD a des champs pour `qty_sac_saisie`
-                # et `qty_kg_saisie`, qui ne sont pas dans votre code initial.
-                # Pour un calcul précis, vous devriez modifier votre base de données.
-                # En attendant, on utilise le calcul basé sur le prix par kg.
-                total_out_value += abs(m["qty_kg"]) * price_kg
-
-        # Calcul du bénéfice. Ce calcul est un simple exemple.
-        # Le calcul de bénéfice réel est plus complexe et nécessite les coûts d'achat.
+                # Use absolute value for OUT movements
+                total_out_value += abs(m["qty_kg"]) * m["unit_price_kg"]
+        
         profit = total_out_value - total_in_value
         
+        # Update summary labels
         self.total_in_var.set(f"Valeur des entrées : {total_in_value:,.2f} FCFA")
         self.total_out_var.set(f"Valeur des sorties : {total_out_value:,.2f} FCFA")
         self.profit_var.set(f"Bénéfice net : {profit:,.2f} FCFA")
         
+        # Change color based on profit/loss
         if profit >= 0:
             self.profit_label.config(bootstyle="success")
         else:
             self.profit_label.config(bootstyle="danger")
 
+        # Populate the Treeview
         for m in items:
             sacs_repr = kg_to_bag_repr(abs(m["qty_kg"]), m["poids_sac_kg"])
             self.tree.insert("", END, values=(

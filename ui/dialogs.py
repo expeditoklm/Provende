@@ -231,7 +231,7 @@ class MovementDialog(ttk.Toplevel):
 
     def save(self):
         try:
-            date = self.date_entry.entry.get()
+            # Récupération des données du formulaire
             shop = self.app.db.get_shop_by_libelle(self.shop_var.get())
             if not shop:
                 Messagebox.show_warning("Boutique non trouvée.", "Erreur")
@@ -258,8 +258,8 @@ class MovementDialog(ttk.Toplevel):
             # Calcul de la quantité totale en kg
             total_qty_kg = (qty_sac * poids_sac) + qty_kg_saisie
             
-            if self.mtype in ("OUT", "ADJ") and total_qty_kg > 0:
-                total_qty_kg = -total_qty_kg
+            if self.mtype in ("OUT", "ADJ"):
+                total_qty_kg = -abs(total_qty_kg) # Utilisez la valeur absolue pour les sorties
             if self.mtype == "ADJ":
                 current_stock = self.app.db.stock_kg(product["id"], shop["id"])
                 total_qty_kg = total_qty_kg - current_stock
@@ -267,9 +267,14 @@ class MovementDialog(ttk.Toplevel):
             price_kg = self.price_kg_var.get()
             note = self.note_var.get()
 
-            # Enregistrement du mouvement avec les quantités en sacs et en kg
+            # Enregistrement du mouvement en passant les bons arguments
             self.app.db.add_movement(
-                date, self.mtype, product["id"], shop["id"], total_qty_kg, price_kg, qty_sac, qty_kg_saisie, note
+                product_id=product["id"],
+                shop_id=shop["id"],
+                mtype=self.mtype,
+                qty_kg=total_qty_kg,
+                unit_price_kg=price_kg,
+                note=note
             )
             
             if self.on_saved:
