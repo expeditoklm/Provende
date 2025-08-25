@@ -10,6 +10,7 @@ class Database:
         self.cnx.execute("PRAGMA foreign_keys = ON;")
         self.cnx.execute("PRAGMA journal_mode = WAL;")
         self._init_db()
+        self._migrate_db() # Ajout de l'appel à la migration
 
     def _init_db(self):
         cur = self.cnx.cursor()
@@ -37,6 +38,7 @@ class Database:
                 type TEXT NOT NULL CHECK(type IN ('IN','OUT','ADJ')),
                 qty_kg REAL NOT NULL,
                 unit_price_kg REAL,
+                unit_price_sac REAL,
                 note TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(product_id) REFERENCES product(id),
@@ -45,6 +47,14 @@ class Database:
         """)
         cur.execute("INSERT OR IGNORE INTO shop(id, libelle) VALUES (1, 'Boutique Principale');")
         self.cnx.commit()
+
+    def _migrate_db(self):
+        """Ajoute la colonne unit_price_sac si elle n'existe pas."""
+        try:
+            self.cnx.execute("SELECT unit_price_sac FROM movement LIMIT 1")
+        except sqlite3.OperationalError:
+            self.cnx.execute("ALTER TABLE movement ADD COLUMN unit_price_sac REAL")
+            self.cnx.commit()
 
     # Shops
     def list_shops(self) -> List[Dict]:
@@ -102,19 +112,19 @@ class Database:
         return dict(r) if r else None
 
     # Movements
-    def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, note: str = "", unit_price_kg: Optional[float] = None):
+    def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, unit_price_kg: Optional[float] = None, unit_price_sac: Optional[float] = None, note: str = ""):
         self.cnx.execute(
-            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, note, created_at) VALUES (?,?,?,?,?,?,?)",
-            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, note, datetime.now().isoformat(timespec="seconds"))
+            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, unit_price_sac, note, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, unit_price_sac, note, datetime.now().isoformat(timespec="seconds"))
         )
         self.cnx.commit()
 
     def list_movements(self,
-                       mtype: Optional[str] = None,
-                       shop_id: Optional[int] = None,
-                       q: str = "",
-                       date_from: Optional[str] = None,
-                       date_to: Optional[str] = None) -> List[Dict]:
+                        mtype: Optional[str] = None,
+                        shop_id: Optional[int] = None,
+                        q: str = "",
+                        date_from: Optional[str] = None,
+                        date_to: Optional[str] = None) -> List[Dict]:
         where = []
         params: List = []
 

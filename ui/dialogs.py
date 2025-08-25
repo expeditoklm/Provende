@@ -73,7 +73,6 @@ class ProductDialog:
 
 
 
-
 class MovementDialog(ttk.Toplevel):
     """
     Boîte de dialogue pour créer ou modifier un mouvement de stock.
@@ -88,6 +87,7 @@ class MovementDialog(ttk.Toplevel):
         self.mtype = mtype
         self.result = None
         
+        # Ajout de méthodes d'aide si elles ne sont pas déjà dans la base de données
         if not hasattr(self.app.db, 'get_shop_by_libelle'):
             self.app.db.get_shop_by_libelle = lambda libelle: next((s for s in self.app.db.list_shops() if s["libelle"] == libelle), None)
         
@@ -113,27 +113,17 @@ class MovementDialog(ttk.Toplevel):
         self.shop_var = ttk.StringVar(value=self.default_shop["libelle"])
         self.product_var = ttk.StringVar(value=self.product["libelle"] if self.product else "")
         self.poids_sac_var = ttk.DoubleVar()
-        self.prix_sac_var = ttk.DoubleVar()
         self.qty_kg_saisie_var = ttk.DoubleVar() 
         self.qty_sac_saisie_var = ttk.DoubleVar() 
         self.price_kg_var = ttk.DoubleVar()
+        self.prix_sac_var = ttk.DoubleVar()
         self.note_var = ttk.StringVar()
         
+        # Initialisation des variables de prix et de poids du sac
         if self.product:
-            if self.product.get("prix_kg") is not None:
-                self.price_kg_var.set(self.product["prix_kg"])
-            else:
-                self.price_kg_var.set(0)
-            
-            if self.product.get("poids_sac_kg") is not None:
-                self.poids_sac_var.set(self.product["poids_sac_kg"])
-            else:
-                self.poids_sac_var.set(0)
-            
-            if self.product.get("prix_sac") is not None:
-                self.prix_sac_var.set(self.product["prix_sac"])
-            else:
-                self.prix_sac_var.set(0)
+            self.price_kg_var.set(self.product.get("prix_kg", 0))
+            self.prix_sac_var.set(self.product.get("prix_sac", 0))
+            self.poids_sac_var.set(self.product.get("poids_sac_kg", 0))
 
         # Création des widgets
         f = ttk.Frame(self.main_frame)
@@ -179,8 +169,8 @@ class MovementDialog(ttk.Toplevel):
         f = ttk.Frame(self.main_frame)
         f.pack(fill=X, pady=5)
         ttk.Label(f, text="Prix/kg (FCFA):", width=15).pack(side=LEFT)
-        self.price_entry = ttk.Entry(f, textvariable=self.price_kg_var)
-        self.price_entry.pack(side=LEFT, fill=X, expand=YES)
+        self.price_kg_entry = ttk.Entry(f, textvariable=self.price_kg_var)
+        self.price_kg_entry.pack(side=LEFT, fill=X, expand=YES)
 
         f = ttk.Frame(self.main_frame)
         f.pack(fill=X, pady=5)
@@ -206,28 +196,18 @@ class MovementDialog(ttk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
     def on_product_select(self, event=None):
+        """Met à jour les prix par défaut quand un produit est sélectionné."""
         product_libelle = self.product_var.get()
         if product_libelle:
             product = self.app.db.get_product_by_libelle(product_libelle)
             if product:
-                if product.get("prix_kg") is not None:
-                    self.price_kg_var.set(product["prix_kg"])
-                else:
-                    self.price_kg_var.set(0)
-                
-                if product.get("poids_sac_kg") is not None:
-                    self.poids_sac_var.set(product["poids_sac_kg"])
-                else:
-                    self.poids_sac_var.set(0)
-                
-                if product.get("prix_sac") is not None:
-                    self.prix_sac_var.set(product["prix_sac"])
-                else:
-                    self.prix_sac_var.set(0)
+                self.price_kg_var.set(product.get("prix_kg", 0))
+                self.prix_sac_var.set(product.get("prix_sac", 0))
+                self.poids_sac_var.set(product.get("poids_sac_kg", 0))
             else:
                 self.price_kg_var.set(0)
-                self.poids_sac_var.set(0)
                 self.prix_sac_var.set(0)
+                self.poids_sac_var.set(0)
 
     def save(self):
         try:
@@ -265,15 +245,18 @@ class MovementDialog(ttk.Toplevel):
                 total_qty_kg = total_qty_kg - current_stock
 
             price_kg = self.price_kg_var.get()
+            price_sac = self.prix_sac_var.get()  # Récupération du prix du sac
             note = self.note_var.get()
 
             # Enregistrement du mouvement en passant les bons arguments
+            # C'est ici que l'appel doit correspondre à la définition de votre fonction add_movement
             self.app.db.add_movement(
                 product_id=product["id"],
                 shop_id=shop["id"],
                 mtype=self.mtype,
                 qty_kg=total_qty_kg,
                 unit_price_kg=price_kg,
+                unit_price_sac=price_sac, # Passage du prix du sac
                 note=note
             )
             
@@ -283,8 +266,6 @@ class MovementDialog(ttk.Toplevel):
 
         except Exception as e:
             Messagebox.show_error(f"Une erreur est survenue: {e}", "Erreur d'enregistrement")
-
-
 
 class LoginDialog(ttk.Toplevel):
     """
