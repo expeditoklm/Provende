@@ -1,0 +1,66 @@
+
+python -m pip install pyinstaller
+python -m PyInstaller --noconfirm --windowed --onefile --name Provenderie --collect-data ttkbootstrap main.py
+
+
+
+
+
+
+
+
+en voulan faire sortir un produit l
+
+je veux savoir a une certaine periode les produit qui ont ete ajouter , leur prix total ainsi que 
+les produits sortie et leux prix au total pur connaitre le benefice fait dans cette periode la
+
+faire en sorte que lorsquon veut faire un out cest a dire une sortie de produit 
+que la quantité entrer soit pas superieur au stock actuelle
+
+je souhaite avoir une colone en surplus dans le tableau qui indique les mouvements ,
+une colonne qui indique le total des stock pour le filtrage 
+et le total egalement pour le prix en considerant le type (in , out ,  adj  ou tous) qui a ete selectionner lors du filtre.
+si tu rencontre in fait addition , out fait soustration et adj ..
+
+sur le dashbore je veux savoir combien de sac de produit jai
+
+bien gerer larchivage et lunicité (SKU et libelle) lors de lenregistrement dun produit en tenant aussi compte de la casse
+
+
+je ne suis pas parfait
+
+surtout ne tentez pas le diable
+
+des gens s'immagine que le pouvoir siege a la maison blanche, mais c'est faux. 
+Les multi nationnales et les crimes organisés sont les vraies dirigeants de la planette.
+
+
+c'est est un ou une.
+Madame , cette conversation est terminée.
+
+ne jamais suivre largumentation de son adversaire , soyez focus sur votre argumentation a 
+vous de peur a etre troubler par celle de votre adversaire
+
+
+je ne peut que vous dire la veriter , pas vous obliger a la croire.
+compte off shore
+
+j'assume completement ce que je suis
+
+je ne vais pas vous supplier de m'accorder le privilege de vous aider
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
