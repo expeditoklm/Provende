@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Tuple
 
 
 
+# --- Module db.py (mis à jour) ---
 class Database:
     def __init__(self, path: str = "provenderie.db"):
         self.path = path
@@ -13,7 +14,7 @@ class Database:
         self.cnx.execute("PRAGMA foreign_keys = ON;")
         self.cnx.execute("PRAGMA journal_mode = WAL;")
         self._init_db()
-        self._migrate_db() # Ajout de l'appel à la migration
+        self._migrate_db()
 
     def _init_db(self):
         cur = self.cnx.cursor()
@@ -42,6 +43,7 @@ class Database:
                 qty_kg REAL NOT NULL,
                 unit_price_kg REAL,
                 unit_price_sac REAL,
+                cost REAL,
                 note TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(product_id) REFERENCES product(id),
@@ -52,14 +54,22 @@ class Database:
         self.cnx.commit()
 
     def _migrate_db(self):
-        """Ajoute la colonne unit_price_sac si elle n'existe pas."""
+        """Ajoute les colonnes manquantes si elles n'existent pas."""
         try:
-            self.cnx.execute("SELECT unit_price_sac FROM movement LIMIT 1")
+            self.cnx.execute("SELECT unit_price_sac, cost FROM movement LIMIT 1")
         except sqlite3.OperationalError:
-            self.cnx.execute("ALTER TABLE movement ADD COLUMN unit_price_sac REAL")
-            self.cnx.commit()
+            try:
+                self.cnx.execute("ALTER TABLE movement ADD COLUMN unit_price_sac REAL")
+                print("Colonne 'unit_price_sac' ajoutée à la table 'movement'.")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self.cnx.execute("ALTER TABLE movement ADD COLUMN cost REAL")
+                print("Colonne 'cost' ajoutée à la table 'movement'.")
+            except sqlite3.OperationalError:
+                pass
+        self.cnx.commit()
 
-    # Shops
     def list_shops(self) -> List[Dict]:
         rows = self.cnx.execute("SELECT * FROM shop ORDER BY id").fetchall()
         return [dict(r) for r in rows]
@@ -80,7 +90,6 @@ class Database:
         self.cnx.commit()
         return True
 
-    # Products
     def add_product(self, sku: Optional[str], libelle: str, poids_sac_kg: float, prix_kg: float, prix_sac: float, seuil_kg: float):
         self.cnx.execute(
             "INSERT INTO product(sku, libelle, poids_sac_kg, prix_kg, prix_sac, seuil_kg) VALUES (?,?,?,?,?,?)",
@@ -91,7 +100,7 @@ class Database:
     def update_product(self, pid: int, sku: Optional[str], libelle: str, poids_sac_kg: float, prix_kg: float, prix_sac: float, seuil_kg: float, actif: int = 1):
         self.cnx.execute(
             """UPDATE product SET sku=?, libelle=?, poids_sac_kg=?, prix_kg=?, prix_sac=?, seuil_kg=?, actif=?
-               WHERE id=?""",
+                WHERE id=?""",
             (sku, libelle, float(poids_sac_kg), float(prix_kg), float(prix_sac), float(seuil_kg), int(actif), pid)
         )
         self.cnx.commit()
@@ -114,11 +123,10 @@ class Database:
         r = self.cnx.execute("SELECT * FROM product WHERE id=?", (pid,)).fetchone()
         return dict(r) if r else None
 
-    # Movements
-    def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, unit_price_kg: Optional[float] = None, unit_price_sac: Optional[float] = None, note: str = ""):
+    def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, unit_price_kg: Optional[float] = None, unit_price_sac: Optional[float] = None, cost: float = 0, note: str = ""):
         self.cnx.execute(
-            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, unit_price_sac, note, created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, unit_price_sac, note, datetime.now().isoformat(timespec="seconds"))
+            "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, unit_price_sac, cost, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, unit_price_sac, float(cost), note, datetime.now().isoformat(timespec="seconds"))
         )
         self.cnx.commit()
 
@@ -187,3 +195,67 @@ class Database:
                 d["stock_kg"] = qty
                 items.append(d)
         return items
+
+    def total_sales_and_cogs(self, mtype: Optional[str] = None, shop_id: Optional[int] = None, q: str = "", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Tuple[float, float]:
+        """
+        Calcule les ventes et le coût des ventes (COGS) en utilisant le coût moyen pondéré.
+        Les filtres sont appliqués à toutes les données pertinentes.
+        """
+        where_clauses = []
+        params: List[Any] = []
+        
+        if shop_id:
+            where_clauses.append("m.shop_id = ?")
+            params.append(shop_id)
+        if q:
+            where_clauses.append("(p.libelle LIKE ? OR ifnull(p.sku,'') LIKE ?)")
+            params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+        if date_from:
+            where_clauses.append("date(m.created_at) >= date(?)")
+            params.append(date_from)
+        if date_to:
+            where_clauses.append("date(m.created_at) <= date(?)")
+            params.append(date_to)
+
+        where_str = " AND ".join(where_clauses)
+        if where_str:
+            where_str = f"WHERE {where_str}"
+
+        # Requête pour obtenir les totaux agrégés par produit
+        sql = f"""
+            SELECT 
+                p.id,
+                SUM(CASE WHEN m.type = 'OUT' THEN COALESCE(m.cost, 0) ELSE 0 END) AS total_revenue_out,
+                SUM(CASE WHEN m.type = 'OUT' THEN ABS(m.qty_kg) ELSE 0 END) AS total_qty_out,
+                SUM(CASE WHEN m.type = 'IN' THEN COALESCE(m.cost, 0) ELSE 0 END) AS total_cost_in,
+                SUM(CASE WHEN m.type = 'IN' THEN ABS(m.qty_kg) ELSE 0 END) AS total_qty_in
+            FROM movement m
+            JOIN product p ON p.id = m.product_id
+            JOIN shop s ON s.id = m.shop_id
+            {where_str}
+            GROUP BY p.id;
+        """
+        
+        rows = self.cnx.execute(sql, params).fetchall()
+
+        total_global_sales = 0.0
+        total_global_cogs = 0.0
+
+        for row in rows:
+            product_id = row["id"]
+            total_revenue_out = row["total_revenue_out"]
+            total_qty_out = row["total_qty_out"]
+            total_cost_in = row["total_cost_in"]
+            total_qty_in = row["total_qty_in"]
+            
+            # Ajout de la revenue des ventes au total global
+            total_global_sales += total_revenue_out
+
+            # Calcul du coût des ventes (COGS) pour ce produit
+            if total_qty_in > 0:
+                avg_cost_per_kg = total_cost_in / total_qty_in
+                cogs_for_product = avg_cost_per_kg * total_qty_out
+                total_global_cogs += cogs_for_product
+        
+        return float(total_global_sales), float(total_global_cogs)
+ 

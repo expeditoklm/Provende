@@ -74,198 +74,211 @@ class ProductDialog:
 
 
 class MovementDialog(ttk.Toplevel):
-    """
-    Boîte de dialogue pour créer ou modifier un mouvement de stock.
-    """
-    def __init__(self, parent, product=None, mtype=None, on_saved=None):
+    def __init__(self, parent, on_saved, product=None, mtype=None, shop=None):
         super().__init__(parent)
         self.transient(parent)
+        self.resizable(False, False)
         self.grab_set()
+        
         self.app = parent
         self.on_saved = on_saved
         self.product = product
         self.mtype = mtype
+        self.shop = shop
         self.result = None
+
+        self.title_text = "Nouveau mouvement"
+        if product:
+            self.title_text = f"Nouveau mouvement pour {product['libelle']}"
+        self.title(self.title_text)
+
+        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
+
+        # --- UI construction ---
+        padding = (10, 10)
+        main_frame = ttk.Frame(self, padding=padding)
+        main_frame.pack(fill=BOTH, expand=YES)
         
-        # Ajout de méthodes d'aide si elles ne sont pas déjà dans la base de données
-        if not hasattr(self.app.db, 'get_shop_by_libelle'):
-            self.app.db.get_shop_by_libelle = lambda libelle: next((s for s in self.app.db.list_shops() if s["libelle"] == libelle), None)
-        
-        if not hasattr(self.app.db, 'get_product_by_libelle'):
-            self.app.db.get_product_by_libelle = lambda libelle: next((p for p in self.app.db.list_products() if p["libelle"] == libelle), None)
+        # Section de sélection de produit
+        if not self.product:
+            ttk.Label(main_frame, text="Produit").pack(anchor=W)
+            self.product_search_var = ttk.StringVar()
+            self.product_entry = ttk.Entry(main_frame, textvariable=self.product_search_var, width=50)
+            self.product_entry.pack(fill=X, pady=(0, 10))
+            self.product_entry.bind("<KeyRelease>", self.on_product_search)
             
-        self.default_shop = self.app.db.list_shops()[0]
+            self.product_listbox = ttk.Treeview(main_frame, columns=["libelle"], show="headings", height=5)
+            self.product_listbox.heading("libelle", text="Sélectionnez un produit")
+            self.product_listbox.pack(fill=X)
+            self.product_listbox.bind("<<TreeviewSelect>>", self.on_product_select)
+            self.product_listbox.bind("<Double-1>", self.on_double_click)
+            self.product_entry.focus_set()
+            self.update_product_list()
+        else:
+            ttk.Label(main_frame, text="Produit :", font="-size 10 -weight bold").pack(anchor=W)
+            ttk.Label(main_frame, text=self.product["libelle"]).pack(anchor=W)
 
-        title_suffix = {
-            "IN": "Entrée",
-            "OUT": "Sortie",
-            "ADJ": "Ajustement"
-        }.get(mtype, "Mouvement")
-        self.title(f"Nouveau mouvement ({title_suffix})")
-        
-        self.main_frame = ttk.Frame(self, padding=20)
-        self.main_frame.pack(fill=BOTH, expand=YES)
-        
-        ttk.Label(self.main_frame, text=f"Mouvement de stock ({title_suffix})", font="-size 12 -weight bold").pack(pady=(0, 10))
-        
-        # Variables de données
-        self.date_var = ttk.StringVar()
-        self.shop_var = ttk.StringVar(value=self.default_shop["libelle"])
-        self.product_var = ttk.StringVar(value=self.product["libelle"] if self.product else "")
-        self.poids_sac_var = ttk.DoubleVar()
-        self.qty_kg_saisie_var = ttk.DoubleVar() 
-        self.qty_sac_saisie_var = ttk.DoubleVar() 
-        self.price_kg_var = ttk.DoubleVar()
-        self.prix_sac_var = ttk.DoubleVar()
-        self.note_var = ttk.StringVar()
-        
-        # Initialisation des variables de prix et de poids du sac
-        if self.product:
-            self.price_kg_var.set(self.product.get("prix_kg", 0))
-            self.prix_sac_var.set(self.product.get("prix_sac", 0))
-            self.poids_sac_var.set(self.product.get("poids_sac_kg", 0))
+        # Cadre pour les détails du mouvement
+        details_frame = ttk.Frame(main_frame)
+        details_frame.pack(fill=X, pady=10)
 
-        # Création des widgets
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Date:", width=15).pack(side=LEFT)
-        self.date_entry = DateEntry(f, dateformat="%Y-%m-%d", bootstyle="primary")
-        self.date_entry.pack(side=LEFT, fill=X, expand=YES)
-
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Boutique:", width=15).pack(side=LEFT)
+        # Labels et Combobox pour le type de mouvement
+        ttk.Label(details_frame, text="Type de mouvement").grid(row=0, column=0, sticky=W, padx=(0,10))
+        self.mtype_var = ttk.StringVar(value=self.mtype or "IN")
+        self.mtype_combo = ttk.Combobox(details_frame, values=["IN", "OUT", "ADJ"], textvariable=self.mtype_var, state="readonly")
+        self.mtype_combo.grid(row=0, column=1, sticky=EW)
+        
+        # Labels et Combobox pour la boutique
+        ttk.Label(details_frame, text="Boutique").grid(row=1, column=0, sticky=W, padx=(0,10), pady=(10,0))
+        self.shop_var = ttk.StringVar(value=self.shop["libelle"] if self.shop else "Boutique Principale")
         shops = self.app.db.list_shops()
         shop_names = [s["libelle"] for s in shops]
-        self.shop_combo = ttk.Combobox(f, values=shop_names, textvariable=self.shop_var, state="readonly")
-        self.shop_combo.pack(side=LEFT, fill=X, expand=YES)
-        self.shop_combo.current(shop_names.index(self.default_shop["libelle"]))
+        self.shop_combo = ttk.Combobox(details_frame, values=shop_names, textvariable=self.shop_var, state="readonly")
+        self.shop_combo.grid(row=1, column=1, sticky=EW, pady=(10,0))
+        self.shop_ids = {s["libelle"]: s["id"] for s in shops}
+        
+        # Cadre pour les quantités (sacs et kg)
+        qty_frame = ttk.Frame(main_frame)
+        qty_frame.pack(fill=X, pady=10)
 
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Produit:", width=15).pack(side=LEFT)
-        self.product_combo = ttk.Combobox(f, textvariable=self.product_var, state="readonly")
-        self.product_combo.pack(side=LEFT, fill=X, expand=YES)
+        ttk.Label(qty_frame, text="Qté (sacs)").grid(row=0, column=0, sticky=W, padx=(0,10))
+        self.sacs_qty_var = ttk.DoubleVar(value=0.0)
+        self.sacs_qty_entry = ttk.Entry(qty_frame, textvariable=self.sacs_qty_var)
+        self.sacs_qty_entry.grid(row=0, column=1, sticky=EW)
+        
+        ttk.Label(qty_frame, text="Qté (kg)").grid(row=1, column=0, sticky=W, padx=(0,10), pady=(10,0))
+        self.kg_qty_var = ttk.DoubleVar(value=0.0)
+        self.kg_qty_entry = ttk.Entry(qty_frame, textvariable=self.kg_qty_var)
+        self.kg_qty_entry.grid(row=1, column=1, sticky=EW, pady=(10,0))
+        
+        # Cadre pour les prix unitaires
+        price_frame = ttk.Frame(main_frame)
+        price_frame.pack(fill=X, pady=10)
+        
+        ttk.Label(price_frame, text="Prix/sac (FCFA)").grid(row=0, column=0, sticky=W, padx=(0,10))
+        self.sac_price_var = ttk.DoubleVar(value=0.0)
+        self.sac_price_entry = ttk.Entry(price_frame, textvariable=self.sac_price_var)
+        self.sac_price_entry.grid(row=0, column=1, sticky=EW)
+
+        ttk.Label(price_frame, text="Prix/kg (FCFA)").grid(row=1, column=0, sticky=W, padx=(0,10), pady=(10,0))
+        self.kg_price_var = ttk.DoubleVar(value=0.0)
+        self.kg_price_entry = ttk.Entry(price_frame, textvariable=self.kg_price_var)
+        self.kg_price_entry.grid(row=1, column=1, sticky=EW, pady=(10,0))
+
+        # Champ de note
+        ttk.Label(main_frame, text="Note (facultatif)").pack(anchor=W, pady=(10,0))
+        self.note_entry = ttk.Text(main_frame, height=3, width=50)
+        self.note_entry.pack(fill=X)
+
+        # Boutons d'action
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=X, pady=(20, 0))
+        ttk.Button(button_frame, text="Annuler", bootstyle="secondary", command=self.on_cancel).pack(side=RIGHT)
+        ttk.Button(button_frame, text="Enregistrer", bootstyle="success", command=self.on_save).pack(side=RIGHT, padx=(0, 10))
+
+    def on_product_search(self, event=None):
+        q = self.product_search_var.get()
+        products = self.app.db.list_products(q=q)
+        self.product_listbox.delete(*self.product_listbox.get_children())
+        for p in products:
+            self.product_listbox.insert("", END, iid=p["id"], values=[f"{p['libelle']} (SKU: {p['sku']})"])
+
+    def on_product_select(self, event):
+        item_id = self.product_listbox.focus()
+        if item_id:
+            product_id = int(item_id)
+            self.product = self.app.db.get_product(product_id)
+            self.title(f"Nouveau mouvement pour {self.product['libelle']}")
+
+    def on_double_click(self, event):
+        item = self.product_listbox.identify('item', event.x, event.y)
+        if item:
+            self.on_product_select(event)
+            self.on_save()
+
+    def on_save(self):
         if not self.product:
-            self.product_combo["values"] = [p["libelle"] for p in self.app.db.list_products(include_inactive=False)]
-        else:
-            self.product_combo["values"] = [self.product["libelle"]]
-        self.product_combo.bind("<<ComboboxSelected>>", self.on_product_select)
+            Messagebox.show_error("Veuillez sélectionner un produit.", "Erreur de saisie")
+            return
 
-        # Champs pour la quantité en sacs
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Quantité (sacs):", width=15).pack(side=LEFT)
-        self.qty_sac_entry = ttk.Entry(f, textvariable=self.qty_sac_saisie_var)
-        self.qty_sac_entry.pack(side=LEFT, fill=X, expand=YES)
-
-        # Champs pour la quantité en kg
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Quantité (kg):", width=15).pack(side=LEFT)
-        self.qty_kg_entry = ttk.Entry(f, textvariable=self.qty_kg_saisie_var)
-        self.qty_kg_entry.pack(side=LEFT, fill=X, expand=YES)
-        
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Prix/kg (FCFA):", width=15).pack(side=LEFT)
-        self.price_kg_entry = ttk.Entry(f, textvariable=self.price_kg_var)
-        self.price_kg_entry.pack(side=LEFT, fill=X, expand=YES)
-
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Prix/sac (FCFA):", width=15).pack(side=LEFT)
-        self.price_sac_entry = ttk.Entry(f, textvariable=self.prix_sac_var)
-        self.price_sac_entry.pack(side=LEFT, fill=X, expand=YES)
-
-        f = ttk.Frame(self.main_frame)
-        f.pack(fill=X, pady=5)
-        ttk.Label(f, text="Note:", width=15).pack(side=LEFT)
-        self.note_entry = ttk.Entry(f, textvariable=self.note_var)
-        self.note_entry.pack(side=LEFT, fill=X, expand=YES)
-
-        # Boutons
-        button_frame = ttk.Frame(self.main_frame)
-        button_frame.pack(fill=X, pady=(10, 0))
-        ttk.Button(button_frame, text="Annuler", command=self.destroy).pack(side=RIGHT)
-        ttk.Button(button_frame, text="Enregistrer", bootstyle="success", command=self.save).pack(side=RIGHT, padx=5)
-        
-        self.update_idletasks()
-        x = parent.winfo_x() + parent.winfo_width() // 2 - self.winfo_width() // 2
-        y = parent.winfo_y() + parent.winfo_height() // 2 - self.winfo_height() // 2
-        self.geometry(f"+{x}+{y}")
-
-    def on_product_select(self, event=None):
-        """Met à jour les prix par défaut quand un produit est sélectionné."""
-        product_libelle = self.product_var.get()
-        if product_libelle:
-            product = self.app.db.get_product_by_libelle(product_libelle)
-            if product:
-                self.price_kg_var.set(product.get("prix_kg", 0))
-                self.prix_sac_var.set(product.get("prix_sac", 0))
-                self.poids_sac_var.set(product.get("poids_sac_kg", 0))
-            else:
-                self.price_kg_var.set(0)
-                self.prix_sac_var.set(0)
-                self.poids_sac_var.set(0)
-
-    def save(self):
         try:
-            # Récupération des données du formulaire
-            shop = self.app.db.get_shop_by_libelle(self.shop_var.get())
-            if not shop:
-                Messagebox.show_warning("Boutique non trouvée.", "Erreur")
-                return
-
-            product_libelle = self.product_var.get()
-            product = self.app.db.get_product_by_libelle(product_libelle)
-            if not product:
-                Messagebox.show_warning("Produit non trouvé.", "Erreur")
-                return
-
-            qty_sac = self.qty_sac_saisie_var.get()
-            qty_kg_saisie = self.qty_kg_saisie_var.get()
-            poids_sac = self.poids_sac_var.get()
-
-            if poids_sac == 0:
-                Messagebox.show_warning("Le poids du sac pour ce produit est de 0. Veuillez le mettre à jour dans la liste des produits.", "Erreur")
-                return
+            num_bags = self.sacs_qty_var.get()
+            num_kg = self.kg_qty_var.get()
             
-            if qty_sac == 0 and qty_kg_saisie == 0:
-                Messagebox.show_warning("Veuillez saisir une quantité en kg ou en sacs.", "Erreur")
+            # Déterminer la quantité totale en kg
+            qty_kg_total = 0.0
+            if self.product["poids_sac_kg"] > 0 and num_bags > 0:
+                qty_kg_total += num_bags * self.product["poids_sac_kg"]
+            
+            qty_kg_total += num_kg
+            
+            if qty_kg_total <= 0:
+                Messagebox.show_error("La quantité totale doit être supérieure à 0.", "Erreur de saisie")
                 return
-            
-            # Calcul de la quantité totale en kg
-            total_qty_kg = (qty_sac * poids_sac) + qty_kg_saisie
-            
-            if self.mtype in ("OUT", "ADJ"):
-                total_qty_kg = -abs(total_qty_kg) # Utilisez la valeur absolue pour les sorties
-            if self.mtype == "ADJ":
-                current_stock = self.app.db.stock_kg(product["id"], shop["id"])
-                total_qty_kg = total_qty_kg - current_stock
 
-            price_kg = self.price_kg_var.get()
-            price_sac = self.prix_sac_var.get()  # Récupération du prix du sac
-            note = self.note_var.get()
+            mtype = self.mtype_var.get()
+            shop_name = self.shop_var.get()
+            shop_id = self.shop_ids.get(shop_name)
+            
+            unit_price_sac = self.sac_price_var.get()
+            unit_price_kg = self.kg_price_var.get()
 
-            # Enregistrement du mouvement en passant les bons arguments
-            # C'est ici que l'appel doit correspondre à la définition de votre fonction add_movement
+            # Calcul du coût total selon les règles
+            cost = 0.0
+            if num_bags > 0 and unit_price_sac > 0:
+                cost += num_bags * unit_price_sac
+            if num_kg > 0 and unit_price_kg > 0:
+                cost += num_kg * unit_price_kg
+            # Si un seul type de prix est renseigné pour une quantité, le coût est calculé sur cette base
+            if num_bags > 0 and num_kg == 0 and unit_price_sac > 0 and unit_price_kg <= 0:
+                cost = num_bags * unit_price_sac
+            elif num_kg > 0 and num_bags == 0 and unit_price_kg > 0 and unit_price_sac <= 0:
+                cost = num_kg * unit_price_kg
+
+            note = self.note_entry.get("1.0", END).strip()
+            
+            # Gestion des mouvements 'OUT'
+            if mtype == "OUT":
+                qty_kg_total = -qty_kg_total
+
+            # Enregistrement du mouvement
             self.app.db.add_movement(
-                product_id=product["id"],
-                shop_id=shop["id"],
-                mtype=self.mtype,
-                qty_kg=total_qty_kg,
-                unit_price_kg=price_kg,
-                unit_price_sac=price_sac, # Passage du prix du sac
+                product_id=self.product["id"],
+                shop_id=shop_id,
+                mtype=mtype,
+                qty_kg=qty_kg_total,
+                unit_price_kg=unit_price_kg if unit_price_kg > 0 else None,
+                unit_price_sac=unit_price_sac if unit_price_sac > 0 else None,
+                cost=cost,
                 note=note
             )
             
-            if self.on_saved:
-                self.on_saved()
+            self.result = "saved"
+            self.on_saved()
             self.destroy()
 
-        except Exception as e:
-            Messagebox.show_error(f"Une erreur est survenue: {e}", "Erreur d'enregistrement")
+        except ValueError:
+            Messagebox.show_error("Veuillez entrer des valeurs numériques valides pour les quantités et les prix.", "Erreur de saisie")
+
+    def on_cancel(self):
+        self.destroy()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class LoginDialog(ttk.Toplevel):
     """

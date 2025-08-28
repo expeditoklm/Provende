@@ -6,10 +6,16 @@ from .base import BasePage
 from .dialogs import MovementDialog
 from utils import kg_to_bag_repr
 
+
+
+
+
+
+
 class MovementsPage(BasePage):
     """
     Page pour afficher et gérer les mouvements (entrées, sorties, ajustements) des produits.
-    Cette version a été mise à jour pour inclure la colonne 'prix_sac' et une section de résumé.
+    Cette version a été mise à jour pour inclure la colonne 'cout' et une section de résumé.
     """
     def on_show(self):
         """
@@ -49,9 +55,12 @@ class MovementsPage(BasePage):
         ttk.Label(f, text="Recherche").pack(side=LEFT, padx=(0,6))
         ttk.Entry(f, textvariable=self.q_var, width=20).pack(side=LEFT)
         ttk.Label(f, text="Type").pack(side=LEFT, padx=(10,6))
-        ttk.Combobox(f, values=["Tous","IN","OUT","ADJ"], textvariable=self.type_var, width=8, state="readonly").pack(side=LEFT)
+        self.type_combo = ttk.Combobox(f, values=["Tous", "IN", "OUT", "ADJ"], textvariable=self.type_var, width=8, state="readonly")
+        self.type_combo.pack(side=LEFT)
+        
         ttk.Label(f, text="Boutique").pack(side=LEFT, padx=(10,6))
-        ttk.Combobox(f, values=shop_names, textvariable=self.shop_var, width=25, state="readonly").pack(side=LEFT)
+        self.shop_combo = ttk.Combobox(f, values=shop_names, textvariable=self.shop_var, width=25, state="readonly")
+        self.shop_combo.pack(side=LEFT)
         
         ttk.Label(f, text="Du").pack(side=LEFT, padx=(10,6))
         self.date_from_entry = DateEntry(f, width=12, dateformat="%Y-%m-%d", bootstyle="primary")
@@ -63,26 +72,29 @@ class MovementsPage(BasePage):
         
         ttk.Button(f, text="Filtrer", bootstyle="secondary", command=self.refresh).pack(side=LEFT, padx=8)
         ttk.Button(f, text="Rafraîchir", bootstyle="info", command=self.refresh).pack(side=LEFT)
+        
+        # Associer les événements de sélection aux combos
+        self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
+        self.shop_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
 
         # Cadre de résumé pour afficher les totaux
         summary_frame = ttk.Frame(self)
         summary_frame.pack(fill=X, pady=(10, 0))
 
         # Variables pour les labels de résumé
-        self.total_in_var = ttk.StringVar(value="Valeur des entrées : 0.00 FCFA")
-        self.total_out_var = ttk.StringVar(value="Valeur des sorties : 0.00 FCFA")
+        self.total_sales_var = ttk.StringVar(value="Valeur des ventes : 0.00 FCFA")
+        self.total_cogs_var = ttk.StringVar(value="Coût des ventes : 0.00 FCFA")
         self.profit_var = ttk.StringVar(value="Bénéfice net : 0.00 FCFA")
 
-        ttk.Label(summary_frame, textvariable=self.total_in_var, font="-size 10 -weight bold", bootstyle="success").pack(side=LEFT, padx=(0, 20))
-        ttk.Label(summary_frame, textvariable=self.total_out_var, font="-size 10 -weight bold", bootstyle="danger").pack(side=LEFT, padx=(0, 20))
+        ttk.Label(summary_frame, textvariable=self.total_sales_var, font="-size 10 -weight bold", bootstyle="success").pack(side=LEFT, padx=(0, 20))
+        ttk.Label(summary_frame, textvariable=self.total_cogs_var, font="-size 10 -weight bold", bootstyle="danger").pack(side=LEFT, padx=(0, 20))
         self.profit_label = ttk.Label(summary_frame, textvariable=self.profit_var, font="-size 12 -weight bold")
         self.profit_label.pack(side=LEFT)
 
         ttk.Separator(self).pack(fill=X, pady=10)
 
         # Tableau (Treeview) pour afficher la liste des mouvements
-        # Colonnes du tableau, incluant 'prix_sac' et 'prix_unit_kg'
-        cols = ("date", "type", "produit", "boutique", "quantite", "en_sacs", "prix_unit_kg", "prix_sac", "note")
+        cols = ("date", "type", "produit", "boutique", "quantite", "en_sacs", "prix_unit_kg", "prix_sac", "cout", "note")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", height=22, bootstyle="info")
         self.tree.pack(fill=BOTH, expand=YES, pady=10)
 
@@ -90,11 +102,11 @@ class MovementsPage(BasePage):
         headers = {
             "date": "Date", "type": "Type", "produit": "Produit", "boutique": "Boutique",
             "quantite": "Qté (kg)", "en_sacs": "Qté (sacs+kg)", "prix_unit_kg": "Prix/kg",
-            "prix_sac": "Prix/sac", "note": "Note"
+            "prix_sac": "Prix/sac", "cout": "Coût", "note": "Note"
         }
         for c in cols:
             self.tree.heading(c, text=headers[c])
-            anchor = E if c in ("quantite", "prix_unit_kg", "prix_sac") else W
+            anchor = E if c in ("quantite", "prix_unit_kg", "prix_sac", "cout") else W
             self.tree.column(c, width=120 if c not in ("note", "produit") else 220, anchor=anchor)
 
     def refresh(self):
@@ -129,31 +141,21 @@ class MovementsPage(BasePage):
             date_from=date_from,
             date_to=date_to
         )
-
-        # Calcule les valeurs de résumé (entrées, sorties, bénéfice)
-        total_in_value = 0
-        total_out_value = 0
-        for m in items:
-            # Utilise la valeur du sac si le prix au kg n'est pas disponible
-            unit_price_kg = m["unit_price_kg"]
-            if unit_price_kg is None:
-                if m["unit_price_sac"] is not None and m["poids_sac_kg"] > 0:
-                    unit_price_kg = m["unit_price_sac"] / m["poids_sac_kg"]
-                else:
-                    unit_price_kg = 0 # Cas où aucune valeur n'est disponible
-            
-            value = m["qty_kg"] * unit_price_kg
-            if m["type"] == "IN":
-                total_in_value += value
-            elif m["type"] == "OUT":
-                # Les sorties sont des valeurs négatives, on prend la valeur absolue
-                total_out_value += abs(value)
         
-        profit = total_out_value - total_in_value
+        # Calcule les totaux en utilisant la nouvelle fonction de la DB
+        total_sales_value, total_cogs_value = self.app.db.total_sales_and_cogs(
+            mtype=mt,
+            shop_id=shop_id,
+            q=self.q_var.get(),
+            date_from=date_from,
+            date_to=date_to
+        )
+        
+        profit = total_sales_value - total_cogs_value
         
         # Met à jour les labels de résumé
-        self.total_in_var.set(f"Valeur des entrées : {total_in_value:,.2f} FCFA")
-        self.total_out_var.set(f"Valeur des sorties : {total_out_value:,.2f} FCFA")
+        self.total_sales_var.set(f"Valeur des ventes : {total_sales_value:,.2f} FCFA")
+        self.total_cogs_var.set(f"Coût des ventes : {total_cogs_value:,.2f} FCFA")
         self.profit_var.set(f"Bénéfice net : {profit:,.2f} FCFA")
         
         # Change la couleur du label de bénéfice selon le résultat
@@ -164,7 +166,7 @@ class MovementsPage(BasePage):
 
         # Remplit le tableau avec les données des mouvements
         for m in items:
-            sacs_repr = kg_to_bag_repr(abs(m["qty_kg"]), m["poids_sac_kg"])
+            sacs_repr = kg_to_bag_repr(abs(m["qty_kg"]), m.get("poids_sac_kg", 0))
             self.tree.insert("", END, values=(
                 m["created_at"],
                 m["type"],
@@ -174,9 +176,11 @@ class MovementsPage(BasePage):
                 sacs_repr,
                 f'{(m["unit_price_kg"] or 0):.0f}',
                 f'{(m["unit_price_sac"] or 0):.0f}',
+                f'{(m["cost"] or 0):,.2f}',
                 m.get("note", "")
             ))
 
+    # --- NOUVELLE MÉTHODE AJOUTÉE ---
     def new_movement(self):
         """
         Ouvre la boîte de dialogue pour créer un nouveau mouvement.
