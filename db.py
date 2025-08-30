@@ -4,7 +4,6 @@ from typing import List, Dict, Optional, Tuple
 
 
 
-
 # --- Module db.py (mis à jour) ---
 class Database:
     def __init__(self, path: str = "provenderie.db"):
@@ -74,6 +73,10 @@ class Database:
         rows = self.cnx.execute("SELECT * FROM shop ORDER BY id").fetchall()
         return [dict(r) for r in rows]
 
+    def get_shop(self, sid: int) -> Optional[Dict]:
+        r = self.cnx.execute("SELECT * FROM shop WHERE id=?", (sid,)).fetchone()
+        return dict(r) if r else None
+
     def add_shop(self, libelle: str):
         self.cnx.execute("INSERT INTO shop(libelle) VALUES (?)", (libelle,))
         self.cnx.commit()
@@ -123,10 +126,24 @@ class Database:
         r = self.cnx.execute("SELECT * FROM product WHERE id=?", (pid,)).fetchone()
         return dict(r) if r else None
 
+    # Méthode pour obtenir un mouvement par son ID
+    def get_movement(self, mid: int) -> Optional[Dict]:
+        r = self.cnx.execute("SELECT * FROM movement WHERE id=?", (mid,)).fetchone()
+        return dict(r) if r else None
+
     def add_movement(self, product_id: int, shop_id: int, mtype: str, qty_kg: float, unit_price_kg: Optional[float] = None, unit_price_sac: Optional[float] = None, cost: float = 0, note: str = ""):
         self.cnx.execute(
             "INSERT INTO movement(product_id, shop_id, type, qty_kg, unit_price_kg, unit_price_sac, cost, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, unit_price_sac, float(cost), note, datetime.now().isoformat(timespec="seconds"))
+        )
+        self.cnx.commit()
+
+    # Nouvelle méthode pour mettre à jour un mouvement
+    def update_movement(self, mid: int, product_id: int, shop_id: int, mtype: str, qty_kg: float, unit_price_kg: Optional[float] = None, unit_price_sac: Optional[float] = None, cost: float = 0, note: str = ""):
+        self.cnx.execute(
+            """UPDATE movement SET product_id=?, shop_id=?, type=?, qty_kg=?, unit_price_kg=?, unit_price_sac=?, cost=?, note=?
+                WHERE id=?""",
+            (product_id, shop_id, mtype, float(qty_kg), unit_price_kg, unit_price_sac, float(cost), note, mid)
         )
         self.cnx.commit()
 
@@ -198,64 +215,33 @@ class Database:
 
     def total_sales_and_cogs(self, mtype: Optional[str] = None, shop_id: Optional[int] = None, q: str = "", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Tuple[float, float]:
         """
-        Calcule les ventes et le coût des ventes (COGS) en utilisant le coût moyen pondéré.
-        Les filtres sont appliqués à toutes les données pertinentes.
+        Calcule les ventes (IN) et les coûts des ventes (OUT) pour les mouvements.
+        Les mouvements de type ADJ sont exclus.
         """
-        where_clauses = []
-        params: List[Any] = []
-        
+        where = []
+        params = []
         if shop_id:
-            where_clauses.append("m.shop_id = ?")
+            where.append("m.shop_id = ?")
             params.append(shop_id)
         if q:
-            where_clauses.append("(p.libelle LIKE ? OR ifnull(p.sku,'') LIKE ?)")
+            where.append("(p.libelle LIKE ? OR ifnull(p.sku,'') LIKE ?)")
             params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
         if date_from:
-            where_clauses.append("date(m.created_at) >= date(?)")
+            where.append("date(m.created_at) >= date(?)")
             params.append(date_from)
         if date_to:
-            where_clauses.append("date(m.created_at) <= date(?)")
+            where.append("date(m.created_at) <= date(?)")
             params.append(date_to)
 
-        where_str = " AND ".join(where_clauses)
-        if where_str:
-            where_str = f"WHERE {where_str}"
-
-        # Requête pour obtenir les totaux agrégés par produit
-        sql = f"""
-            SELECT 
-                p.id,
-                SUM(CASE WHEN m.type = 'OUT' THEN COALESCE(m.cost, 0) ELSE 0 END) AS total_revenue_out,
-                SUM(CASE WHEN m.type = 'OUT' THEN ABS(m.qty_kg) ELSE 0 END) AS total_qty_out,
-                SUM(CASE WHEN m.type = 'IN' THEN COALESCE(m.cost, 0) ELSE 0 END) AS total_cost_in,
-                SUM(CASE WHEN m.type = 'IN' THEN ABS(m.qty_kg) ELSE 0 END) AS total_qty_in
+        base_sql = """
+            SELECT
+                SUM(CASE WHEN m.type='OUT' THEN m.cost ELSE 0 END) AS total_sales,
+                SUM(CASE WHEN m.type='IN' THEN m.cost ELSE 0 END) AS total_cogs
             FROM movement m
             JOIN product p ON p.id = m.product_id
-            JOIN shop s ON s.id = m.shop_id
-            {where_str}
-            GROUP BY p.id;
         """
-        
-        rows = self.cnx.execute(sql, params).fetchall()
+        if where:
+            base_sql += " WHERE " + " AND ".join(where)
 
-        total_global_sales = 0.0
-        total_global_cogs = 0.0
-
-        for row in rows:
-            product_id = row["id"]
-            total_revenue_out = row["total_revenue_out"]
-            total_qty_out = row["total_qty_out"]
-            total_cost_in = row["total_cost_in"]
-            total_qty_in = row["total_qty_in"]
-            
-            # Ajout de la revenue des ventes au total global
-            total_global_sales += total_revenue_out
-
-            # Calcul du coût des ventes (COGS) pour ce produit
-            if total_qty_in > 0:
-                avg_cost_per_kg = total_cost_in / total_qty_in
-                cogs_for_product = avg_cost_per_kg * total_qty_out
-                total_global_cogs += cogs_for_product
-        
-        return float(total_global_sales), float(total_global_cogs)
- 
+        row = self.cnx.execute(base_sql, params).fetchone()
+        return float(row["total_sales"] or 0), float(row["total_cogs"] or 0)

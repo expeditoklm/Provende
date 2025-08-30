@@ -2,7 +2,9 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import QueryDialog ,Messagebox
 from utils import safe_float
-from ttkbootstrap import DateEntry  # Correction de l'importation
+from ttkbootstrap import DateEntry
+from typing import Optional, Dict
+from utils import kg_to_bag_repr
 
 class ProductDialog:
     def __init__(self, app, product=None, on_saved=None):
@@ -71,10 +73,15 @@ class ProductDialog:
             Messagebox.show_error(str(e), "Erreur")
 
 
-
-
 class MovementDialog(ttk.Toplevel):
-    def __init__(self, parent, on_saved, product=None, mtype=None, shop=None):
+    def __init__(self, parent, on_saved, movement_data=None, product=None, mtype=None, shop=None):
+        """
+        Initialise le dialogue de mouvement.
+        
+        :param parent: La fenêtre parente (généralement la fenêtre principale de l'application).
+        :param on_saved: La fonction de rappel à exécuter après un enregistrement réussi.
+        :param movement_data: (Optionnel) Un dictionnaire contenant les données d'un mouvement existant à modifier.
+        """
         super().__init__(parent)
         self.transient(parent)
         self.resizable(False, False)
@@ -82,23 +89,54 @@ class MovementDialog(ttk.Toplevel):
         
         self.app = parent
         self.on_saved = on_saved
-        self.product = product
-        self.mtype = mtype
-        self.shop = shop
-        self.result = None
+        self.movement_data = movement_data
+        
+        # Initialise les attributs de la classe en fonction des données fournies
+        if self.movement_data:
+            self.product = self.app.db.get_product(self.movement_data['product_id'])
+            self.mtype = self.movement_data.get('type')  # Utilisation de 'type' qui est le nom de la colonne
+            self.shop = self.app.db.get_shop(self.movement_data.get('shop_id'))
+            
+            # Ajuster les quantités pour l'affichage
+            self.qty_kg_total = self.movement_data.get('qty_kg', 0.0)
+            
+            self.sacs_qty_value = 0.0
+            self.kg_qty_value = 0.0
+            if self.product and self.product.get("poids_sac_kg", 0) > 0:
+                self.sacs_qty_value = int(abs(self.qty_kg_total) / self.product["poids_sac_kg"])
+                self.kg_qty_value = abs(self.qty_kg_total) % self.product["poids_sac_kg"]
+            else:
+                self.kg_qty_value = abs(self.qty_kg_total)
 
+            self.sac_price_value = self.movement_data.get('unit_price_sac', 0.0)
+            self.kg_price_value = self.movement_data.get('unit_price_kg', 0.0)
+            self.note_value = self.movement_data.get('note', '')
+
+        else: # Nouvel enregistrement, utiliser les valeurs initiales ou celles passées en argument
+            self.product = product
+            self.mtype = mtype
+            self.shop = shop
+            self.sacs_qty_value = 0.0
+            self.kg_qty_value = 0.0
+            self.sac_price_value = 0.0
+            self.kg_price_value = 0.0
+            self.note_value = ''
+
+        # Configuration du titre de la fenêtre
         self.title_text = "Nouveau mouvement"
-        if product:
-            self.title_text = f"Nouveau mouvement pour {product['libelle']}"
+        if self.movement_data:
+            self.title_text = "Modifier le mouvement"
+        elif self.product:
+            self.title_text = f"Nouveau mouvement pour {self.product['libelle']}"
         self.title(self.title_text)
 
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
 
-        # --- UI construction ---
+        # --- Construction de l'UI ---
         padding = (10, 10)
         main_frame = ttk.Frame(self, padding=padding)
         main_frame.pack(fill=BOTH, expand=YES)
-        
+
         # Section de sélection de produit
         if not self.product:
             ttk.Label(main_frame, text="Produit").pack(anchor=W)
@@ -142,12 +180,12 @@ class MovementDialog(ttk.Toplevel):
         qty_frame.pack(fill=X, pady=10)
 
         ttk.Label(qty_frame, text="Qté (sacs)").grid(row=0, column=0, sticky=W, padx=(0,10))
-        self.sacs_qty_var = ttk.DoubleVar(value=0.0)
+        self.sacs_qty_var = ttk.DoubleVar(value=self.sacs_qty_value)
         self.sacs_qty_entry = ttk.Entry(qty_frame, textvariable=self.sacs_qty_var)
         self.sacs_qty_entry.grid(row=0, column=1, sticky=EW)
         
         ttk.Label(qty_frame, text="Qté (kg)").grid(row=1, column=0, sticky=W, padx=(0,10), pady=(10,0))
-        self.kg_qty_var = ttk.DoubleVar(value=0.0)
+        self.kg_qty_var = ttk.DoubleVar(value=self.kg_qty_value)
         self.kg_qty_entry = ttk.Entry(qty_frame, textvariable=self.kg_qty_var)
         self.kg_qty_entry.grid(row=1, column=1, sticky=EW, pady=(10,0))
         
@@ -156,12 +194,12 @@ class MovementDialog(ttk.Toplevel):
         price_frame.pack(fill=X, pady=10)
         
         ttk.Label(price_frame, text="Prix/sac (FCFA)").grid(row=0, column=0, sticky=W, padx=(0,10))
-        self.sac_price_var = ttk.DoubleVar(value=0.0)
+        self.sac_price_var = ttk.DoubleVar(value=self.sac_price_value)
         self.sac_price_entry = ttk.Entry(price_frame, textvariable=self.sac_price_var)
         self.sac_price_entry.grid(row=0, column=1, sticky=EW)
 
         ttk.Label(price_frame, text="Prix/kg (FCFA)").grid(row=1, column=0, sticky=W, padx=(0,10), pady=(10,0))
-        self.kg_price_var = ttk.DoubleVar(value=0.0)
+        self.kg_price_var = ttk.DoubleVar(value=self.kg_price_value)
         self.kg_price_entry = ttk.Entry(price_frame, textvariable=self.kg_price_var)
         self.kg_price_entry.grid(row=1, column=1, sticky=EW, pady=(10,0))
 
@@ -169,6 +207,8 @@ class MovementDialog(ttk.Toplevel):
         ttk.Label(main_frame, text="Note (facultatif)").pack(anchor=W, pady=(10,0))
         self.note_entry = ttk.Text(main_frame, height=3, width=50)
         self.note_entry.pack(fill=X)
+        if self.note_value:
+            self.note_entry.insert("1.0", self.note_value)
 
         # Boutons d'action
         button_frame = ttk.Frame(main_frame)
@@ -241,17 +281,32 @@ class MovementDialog(ttk.Toplevel):
             if mtype == "OUT":
                 qty_kg_total = -qty_kg_total
 
-            # Enregistrement du mouvement
-            self.app.db.add_movement(
-                product_id=self.product["id"],
-                shop_id=shop_id,
-                mtype=mtype,
-                qty_kg=qty_kg_total,
-                unit_price_kg=unit_price_kg if unit_price_kg > 0 else None,
-                unit_price_sac=unit_price_sac if unit_price_sac > 0 else None,
-                cost=cost,
-                note=note
-            )
+            # Vérifier si c'est une mise à jour ou un nouvel enregistrement
+            if self.movement_data:
+                # Mise à jour du mouvement existant
+                self.app.db.update_movement(
+                    mid=self.movement_data.get('id'), # Correction ici: utilisation de 'mid'
+                    product_id=self.product["id"],
+                    shop_id=shop_id,
+                    mtype=mtype,
+                    qty_kg=qty_kg_total,
+                    unit_price_kg=unit_price_kg if unit_price_kg > 0 else None,
+                    unit_price_sac=unit_price_sac if unit_price_sac > 0 else None,
+                    cost=cost,
+                    note=note
+                )
+            else:
+                # Enregistrement d'un nouveau mouvement
+                self.app.db.add_movement(
+                    product_id=self.product["id"],
+                    shop_id=shop_id,
+                    mtype=mtype,
+                    qty_kg=qty_kg_total,
+                    unit_price_kg=unit_price_kg if unit_price_kg > 0 else None,
+                    unit_price_sac=unit_price_sac if unit_price_sac > 0 else None,
+                    cost=cost,
+                    note=note
+                )
             
             self.result = "saved"
             self.on_saved()
@@ -262,22 +317,6 @@ class MovementDialog(ttk.Toplevel):
 
     def on_cancel(self):
         self.destroy()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class LoginDialog(ttk.Toplevel):
@@ -329,20 +368,3 @@ class LoginDialog(ttk.Toplevel):
         """Gère la fermeture de la fenêtre (ferme toute l'application)."""
         if Messagebox.okcancel("Quitter l'application ? Les modifications non sauvegardées seront perdues.", "Confirmation", parent=self):
             self.master.destroy()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

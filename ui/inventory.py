@@ -17,7 +17,7 @@ class InventoryPage(BasePage):
         header = ttk.Frame(self); header.pack(fill=X)
         ttk.Label(header, text="Inventaire (comptage et ajustements)", font="-size 14 -weight bold").pack(side=LEFT)
         ttk.Button(header, text="Ajustement rapide", bootstyle="warning", command=self.adjust_selected).pack(side=RIGHT)
-
+ 
         ttk.Separator(self).pack(fill=X, pady=10)
 
         self.q_var = ttk.StringVar()

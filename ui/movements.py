@@ -5,17 +5,13 @@ from ttkbootstrap import DateEntry
 from .base import BasePage
 from .dialogs import MovementDialog
 from utils import kg_to_bag_repr
-
-
-
-
-
+from typing import Optional, Dict, List, Tuple
 
 
 class MovementsPage(BasePage):
     """
     Page pour afficher et gérer les mouvements (entrées, sorties, ajustements) des produits.
-    Cette version a été mise à jour pour inclure la colonne 'cout' et une section de résumé.
+    Cette version a été mise à jour pour inclure la modification des mouvements.
     """
     def on_show(self):
         """
@@ -71,7 +67,7 @@ class MovementsPage(BasePage):
         self.date_to_entry.pack(side=LEFT)
         
         ttk.Button(f, text="Filtrer", bootstyle="secondary", command=self.refresh).pack(side=LEFT, padx=8)
-        ttk.Button(f, text="Rafraîchir", bootstyle="info", command=self.refresh).pack(side=LEFT)
+        ttk.Button(f, text="Rafraîchir", bootstyle="info", command=self.reset_and_refresh).pack(side=LEFT)
         
         # Associer les événements de sélection aux combos
         self.type_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh())
@@ -97,6 +93,7 @@ class MovementsPage(BasePage):
         cols = ("date", "type", "produit", "boutique", "quantite", "en_sacs", "prix_unit_kg", "prix_sac", "cout", "note")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", height=22, bootstyle="info")
         self.tree.pack(fill=BOTH, expand=YES, pady=10)
+        self.tree.bind("<Double-1>", self.on_edit_movement) # Ajout du gestionnaire de double-clic
 
         # En-têtes et propriétés des colonnes
         headers = {
@@ -167,7 +164,7 @@ class MovementsPage(BasePage):
         # Remplit le tableau avec les données des mouvements
         for m in items:
             sacs_repr = kg_to_bag_repr(abs(m["qty_kg"]), m.get("poids_sac_kg", 0))
-            self.tree.insert("", END, values=(
+            self.tree.insert("", END, iid=m["id"], values=(
                 m["created_at"],
                 m["type"],
                 m["product_libelle"],
@@ -179,10 +176,27 @@ class MovementsPage(BasePage):
                 f'{(m["cost"] or 0):,.2f}',
                 m.get("note", "")
             ))
+    
+    def reset_and_refresh(self):
+        """
+        Vide le champ de recherche et rafraîchit la liste des produits.
+        """
+        self.q_var.set("")
+        self.refresh()
 
-    # --- NOUVELLE MÉTHODE AJOUTÉE ---
     def new_movement(self):
         """
         Ouvre la boîte de dialogue pour créer un nouveau mouvement.
         """
         MovementDialog(self.app, on_saved=self.refresh)
+
+    def on_edit_movement(self, event):
+        """
+        Gère le double-clic sur une ligne pour ouvrir le formulaire en mode édition.
+        """
+        selected_item = self.tree.focus()
+        if selected_item:
+            movement_id = int(selected_item)
+            movement_data = self.app.db.get_movement(movement_id)
+            if movement_data:
+                MovementDialog(self.app, on_saved=self.refresh, movement_data=movement_data)

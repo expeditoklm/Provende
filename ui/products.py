@@ -36,7 +36,7 @@ class ProductsPage(BasePage):
         self.q_var = ttk.StringVar()
         ttk.Entry(search, textvariable=self.q_var).pack(side=LEFT, padx=(0, 6))
         ttk.Button(search, text="Rechercher", bootstyle="secondary", command=self.refresh).pack(side=LEFT)
-        ttk.Button(search, text="Rafraîchir", bootstyle="info", command=self.refresh).pack(side=LEFT, padx=6)
+        ttk.Button(search, text="Rafraîchir", bootstyle="info", command=self.reset_and_refresh).pack(side=LEFT, padx=6)
 
         # Table des produits
         cols = ("id","sku","libelle","poids_sac","stock","prix_kg","prix_sac","seuil","actif")
@@ -77,6 +77,14 @@ class ProductsPage(BasePage):
                 p["id"], p.get("sku",""), p["libelle"], f'{p["poids_sac_kg"]:.2f}',
                 stock_aff, f'{p["prix_kg"]:.0f}', f'{p["prix_sac"]:.0f}', f'{p["seuil_kg"]:.0f}', "Oui" if p.get("actif",1) else "Non"
             ))
+
+    
+    def reset_and_refresh(self):
+        """
+        Vide le champ de recherche et rafraîchit la liste des produits.
+        """
+        self.q_var.set("")
+        self.refresh()
 
     def selected_product(self):
         """Retourne le dictionnaire du produit sélectionné, ou None si aucun n'est sélectionné."""
